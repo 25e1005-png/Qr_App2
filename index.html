@@ -4,336 +4,79 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#080d18">
-
-  <title>QR MEISHI | Contact Manager</title>
-
+  <title>QR名刺管理アプリ</title>
   <link rel="stylesheet" href="style.css">
-
-  <!-- QR Scanner -->
-  <script src="https://unpkg.com/html5-qrcode"></script>
-
-  <!-- QR Generator -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-
-  <!-- Chart -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <script src="script.js" defer></script>
+  <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
-
 <body>
+  <header>
+    <h1>QR名刺管理アプリ</h1>
+    <p>連絡先を簡単に管理・共有</p>
+  </header>
 
-<div class="app">
-
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-
-    <div class="logo">
-      <div class="logo-icon">QR</div>
-      <div>
-        <h2>MEISHI</h2>
-        <span>CONTACT MANAGER</span>
-      </div>
-    </div>
-
-    <nav>
-      <button class="nav-item active" data-target="dashboard">⌂ Dashboard</button>
-      <button class="nav-item" data-target="contacts">▤ Contacts</button>
-      <button class="nav-item" data-target="analytics">▥ Analytics</button>
-      <button class="nav-item" data-target="transfer">▦ QR Transfer</button>
-    </nav>
-
-    <div class="sidebar-bottom">
-      <span>QR MEISHI APP</span>
-      <small>VERSION 1.0.0</small>
-    </div>
-
-  </aside>
-
-  <!-- MAIN -->
-  <main class="main">
-
-    <header class="topbar">
-      <div>
-        <h1 id="pageTitle">Dashboard</h1>
-        <p>名刺情報をスマートに管理しましょう。</p>
-      </div>
-
-      <button class="primary-btn" id="openScanner">
-        ＋ QR Scan
-      </button>
-    </header>
-
-    <!-- DASHBOARD -->
-    <section id="dashboard" class="page active">
-
-      <div class="welcome">
-        <div>
-          <span>WELCOME TO QR MEISHI</span>
-          <h2>Manage your connections.</h2>
-          <p>名刺を読み込んで、簡単に管理できます。</p>
-        </div>
-        <div class="welcome-icon">▣</div>
-      </div>
-
-      <!-- STATISTICS -->
-      <div class="stats-grid">
-
-        <div class="stat-card">
-          <span>Total Contacts</span>
-          <h2 id="totalCount">0</h2>
-          <small>登録人数</small>
-        </div>
-
-        <div class="stat-card">
-          <span>Friends</span>
-          <h2 id="friendCount">0</h2>
-          <small>友達</small>
-        </div>
-
-        <div class="stat-card">
-          <span>Teachers</span>
-          <h2 id="teacherCount">0</h2>
-          <small>先生</small>
-        </div>
-
-        <div class="stat-card">
-          <span>Others</span>
-          <h2 id="otherCount">0</h2>
-          <small>その他</small>
-        </div>
-
-      </div>
-
-      <div class="content-grid">
-
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Contact Overview</h3>
-            <span>グループ別人数</span>
-          </div>
-
-          <div class="chart-container">
-            <canvas id="groupChart"></canvas>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-heading">
-            <h3>Quick Actions</h3>
-          </div>
-
-          <button class="action-card" id="quickScan">
-            <span>▣</span>
-            <div>
-              <b>QRコードを読み込む</b>
-              <small>新しい名刺を登録する</small>
-            </div>
-            <span>→</span>
-          </button>
-
-          <button class="action-card" id="quickContacts">
-            <span>▤</span>
-            <div>
-              <b>名刺リストを見る</b>
-              <small>登録した人を確認する</small>
-            </div>
-            <span>→</span>
-          </button>
-
-          <button class="action-card" id="quickTransfer">
-            <span>▦</span>
-            <div>
-              <b>QR一括転送</b>
-              <small>全員のデータを共有する</small>
-            </div>
-            <span>→</span>
-          </button>
-
-        </div>
-
-      </div>
-
-      <div class="panel recent-panel">
-        <div class="panel-heading">
-          <h3>Recent Contacts</h3>
-          <button class="text-btn" data-target="contacts">
-            すべて見る →
-          </button>
-        </div>
-
-        <div id="recentList" class="recent-list"></div>
-      </div>
-
+  <main>
+    <section class="dashboard">
+      <div class="stat"><span>登録人数</span><strong id="totalCount">0</strong></div>
+      <div class="stat"><span>友達</span><strong id="friendCount">0</strong></div>
+      <div class="stat"><span>先生</span><strong id="teacherCount">0</strong></div>
+      <div class="stat"><span>その他</span><strong id="otherCount">0</strong></div>
     </section>
 
-    <!-- CONTACTS -->
-    <section id="contacts" class="page">
-
-      <div class="panel">
-
-        <div class="panel-heading">
-          <div>
-            <h3>My Contacts</h3>
-            <span>登録した名刺一覧</span>
-          </div>
-
-          <button class="primary-btn" id="contactScan">
-            ＋ Add Contact
-          </button>
-        </div>
-
-        <div class="filters">
-          <input
-            type="search"
-            id="searchInput"
-            placeholder="名前を検索..."
-          >
-
-          <select id="groupFilter">
-            <option value="all">すべて</option>
-            <option value="friend">友達</option>
-            <option value="teacher">先生</option>
-            <option value="other">その他</option>
-          </select>
-        </div>
-
-        <div class="group-tabs">
-          <button class="group-tab active" data-group="all">すべて</button>
-          <button class="group-tab" data-group="friend">友達</button>
-          <button class="group-tab" data-group="teacher">先生</button>
-          <button class="group-tab" data-group="other">その他</button>
-        </div>
-
-        <div id="contactList" class="contact-list"></div>
-
-      </div>
-
+    <section class="panel">
+      <h2>連絡先を追加</h2>
+      <form id="contactForm">
+        <input id="name" placeholder="名前" required>
+        <input id="phone" placeholder="電話番号">
+        <input id="email" type="email" placeholder="メールアドレス">
+        <input id="url" type="url" placeholder="Webサイト URL">
+        <select id="group">
+          <option value="friend">友達</option>
+          <option value="teacher">先生</option>
+          <option value="other">その他</option>
+        </select>
+        <button type="submit">登録する</button>
+      </form>
     </section>
 
-    <!-- ANALYTICS -->
-    <section id="analytics" class="page">
-
-      <div class="panel">
-        <div class="panel-heading">
-          <h3>Contact Analytics</h3>
-          <span>登録人数の分析</span>
-        </div>
-
-        <div class="chart-container">
-          <canvas id="analyticsChart"></canvas>
-        </div>
-
+    <section class="panel">
+      <h2>QRコード読み込み</h2>
+      <div class="actions">
+        <button id="startScan">カメラで読み込む</button>
+        <button id="stopScan">カメラ停止</button>
       </div>
-
+      <div id="reader"></div>
+      <p id="status">QRコードを読み込んでください。</p>
     </section>
 
-    <!-- QR TRANSFER -->
-    <section id="transfer" class="page">
-
-      <div class="panel">
-        <div class="panel-heading">
-          <div>
-            <h3>QR Code Transfer</h3>
-            <span>全員分のデータを共有</span>
-          </div>
-        </div>
-
-        <p>
-          登録した全員のデータを1つのQRコードに変換します。
-        </p>
-
-        <button class="primary-btn" id="generateQR">
-          全員分をQRにする
-        </button>
-
-        <div id="generatedQR" class="generated-qr"></div>
-
-        <div class="divider"></div>
-
-        <h3>QRコードを読み込む</h3>
-
-        <button class="secondary-btn" id="importQR">
-          QRコードを読み取る
-        </button>
-
-      </div>
-
-    </section>
-
-  </main>
-
-</div>
-
-<!-- SCANNER MODAL -->
-<div class="modal" id="scannerModal">
-
-  <div class="modal-box">
-
-    <div class="modal-heading">
-      <h2>QR Scanner</h2>
-      <button class="close-btn" id="closeScanner">✕</button>
-    </div>
-
-    <p>QRコードをカメラで読み取ってください。</p>
-
-    <div id="reader"></div>
-
-    <p id="scanStatus"></p>
-
-  </div>
-
-</div>
-
-<!-- CONTACT FORM MODAL -->
-<div class="modal" id="contactModal">
-
-  <div class="modal-box">
-
-    <div class="modal-heading">
-      <h2>Contact Information</h2>
-      <button class="close-btn" id="closeContact">✕</button>
-    </div>
-
-    <form id="contactForm">
-
-      <label>名前 / Name</label>
-      <input type="text" id="contactName" required>
-
-      <label>電話番号 / Phone</label>
-      <input type="tel" id="contactPhone">
-
-      <label>メールアドレス / Email</label>
-      <input type="email" id="contactEmail">
-
-      <label>URL / Website</label>
-      <input type="url" id="contactUrl">
-
-      <label>グループ / Group</label>
-
-      <select id="contactGroup" required>
-        <option value="">グループを選択</option>
+    <section class="panel">
+      <h2>連絡先一覧</h2>
+      <input id="search" placeholder="名前・電話番号で検索">
+      <select id="filterGroup">
+        <option value="all">すべて表示</option>
         <option value="friend">友達</option>
         <option value="teacher">先生</option>
         <option value="other">その他</option>
       </select>
+      <div id="contactList"></div>
+    </section>
 
-      <button type="submit" class="primary-btn">
-        保存する
-      </button>
+    <section class="panel">
+      <h2>データ転送</h2>
+      <p>連絡先を複数のQRコードに分けて共有できます。</p>
+      <button id="exportData">転送用QRコードを作成</button>
+      <div id="generatedQR"></div>
+      <button id="importData">転送QRを読み込む</button>
+    </section>
 
-    </form>
+    <section class="panel">
+      <h2>操作履歴</h2>
+      <p id="undoMessage">削除した連絡先は45秒以内なら復元できます。</p>
+      <button id="undoButton" disabled>元に戻す</button>
+    </section>
+  </main>
 
-  </div>
-
-</div>
-
-<!-- UNDO MESSAGE -->
-<div id="undoToast" class="undo-toast">
-  <span>名刺を削除しました。</span>
-  <button id="undoBtn">元に戻す</button>
-</div>
-
+  <footer>QR名刺管理アプリ</footer>
+  <script src="script.js"></script>
 </body>
 </html>
