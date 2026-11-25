@@ -1,883 +1,565 @@
 
 "use strict";
 
-/* =====================================
-   QR MEISHI - MAIN JAVASCRIPT
-===================================== */
-
 const STORAGE_KEY = "qrMeishiContacts";
+const TRANSFER_KEY = "qrMeishiPendingTransfer";
 
-let contacts = loadContacts();
+let contacts = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
 let scanner = null;
 let pendingDelete = null;
-let deleteTimer = null;
-let activeGroup = "all";
-let groupChart = null;
-let analyticsChart = null;
+let pendingTimer = null;
+let transferPages = [];
+let transferPageIndex = 0;
+let draggingId = null;
 
-/* =====================================
-   ELEMENTS
-===================================== */
-
-const $ = (id) => document.getElementById(id);
-
-const scannerModal = $("scannerModal");
-const contactModal = $("contactModal");
-const contactForm = $("contactForm");
-const undoToast = $("undoToast");
-
-const contactName = $("contactName");
-const contactPhone = $("contactPhone");
-const contactEmail = $("contactEmail");
-const contactUrl = $("contactUrl");
-const contactGroup = $("contactGroup");
-
-/* =====================================
-   DATA STORAGE
-===================================== */
-
-function loadContacts() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return Array.isArray(saved) ? saved : [];
-  } catch (error) {
-    console.error("データ読み込みエラー:", error);
-    return [];
-  }
-}
+const $ = id => document.getElementById(id);
 
 function saveContacts() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(contacts));
 }
 
-function createId() {
-  return Date.now().toString(36) +
-    Math.random().toString(36).slice(2, 8);
+function makeId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-/* =====================================
-   GROUP SETTINGS
-===================================== */
-
-const groupNames = {
-  friend: "友達",
-  teacher: "先生",
-  other: "その他"
-};
-
-function getGroupName(group) {
-  return groupNames[group] || "その他";
+function normalize(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
-/* =====================================
-   PAGE NAVIGATION
-===================================== */
-
-function showPage(pageId) {
-  document.querySelectorAll(".page").forEach(page => {
-    page.classList.toggle("active", page.id === pageId);
-  });
-
-  document.querySelectorAll(".nav-item").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.target === pageId
-    );
-  });
-
-  const titles = {
-    dashboard: "Dashboard",
-    contacts: "Contacts",
-    analytics: "Analytics",
-    transfer: "QR Transfer"
-  };
-
-  $("pageTitle").textContent = titles[pageId] || "Dashboard";
-
-  if (pageId === "analytics") {
-    updateCharts();
-  }
-
-  if (pageId === "dashboard") {
-    renderRecent();
-  }
-}
-
-document.querySelectorAll("[data-target]").forEach(button => {
-  button.addEventListener("click", () => {
-    showPage(button.dataset.target);
-  });
-});
-
-$("quickContacts").addEventListener("click", () => {
-  showPage("contacts");
-});
-
-$("quickTransfer").addEventListener("click", () => {
-  showPage("transfer");
-});
-
-/* =====================================
-   QR SCANNER
-===================================== */
-
-function openScanner() {
-  scannerModal.classList.add("show");
-  $("scanStatus").textContent = "カメラを起動しています...";
-
-  if (typeof Html5Qrcode === "undefined") {
-    $("scanStatus").textContent =
-      "QR読み取りライブラリを読み込めませんでした。";
-    return;
-  }
-
-  scanner = new Html5Qrcode("reader");
-
-  scanner.start(
-    { facingMode: "environment" },
-    {
-      fps: 10,
-      qrbox: { width: 230, height: 230 }
-    },
-    (decodedText) => {
-      stopScanner();
-      handleQRData(decodedText);
-    },
-    () => {
-      // 読み取り途中のエラーは無視する
-    }
-  ).then(() => {
-    $("scanStatus").textContent =
-      "QRコードをカメラに向けてください。";
-  }).catch(error => {
-    console.error(error);
-    $("scanStatus").textContent =
-      "カメラを起動できません。カメラの使用を許可してください。";
+function isDuplicateContact(item, list = contacts) {
+  return list.some(c => {
+    return normalize(c.name) === normalize(item.name) &&
+      normalize(c.phone) === normalize(item.phone) &&
+      normalize(c.email) === normalize(item.email) &&
+      normalize(c.url) === normalize(item.url);
   });
 }
 
-function stopScanner() {
-  if (!scanner) {
-    scannerModal.classList.remove("show");
-    return;
-  }
-
-  const currentScanner = scanner;
-  scanner = null;
-
-  currentScanner.stop()
-    .then(() => currentScanner.clear())
-    .catch(error => console.warn(error))
-    .finally(() => {
-      scannerModal.classList.remove("show");
-    });
-}
-
-$("openScanner").addEventListener("click", openScanner);
-$("quickScan").addEventListener("click", openScanner);
-$("contactScan").addEventListener("click", openScanner);
-$("closeScanner").addEventListener("click", stopScanner);
-
-/* =====================================
-   QR DATA READING
-===================================== */
-
-function handleQRData(rawText) {
-  const text = rawText.trim();
-
-  if (text.startsWith("QRMEISHI:")) {
-    importAllContacts(text);
-    return;
-  }
-
-  const data = parseQRContact(text);
-
-  contactForm.reset();
-
-  contactName.value = data.name || "";
-  contactPhone.value = data.phone || "";
-  contactEmail.value = data.email || "";
-  contactUrl.value = data.url || "";
-  contactGroup.value = "";
-
-  contactModal.classList.add("show");
-}
-
-function parseQRContact(text) {
-  const result = {
-    name: "",
-    phone: "",
-    email: "",
-    url: ""
-  };
-
-  const lines = text.replace(/\r/g, "").split("\n");
-
-  // vCard形式
-  if (/BEGIN:VCARD/i.test(text)) {
-    lines.forEach(line => {
-      const colon = line.indexOf(":");
-      if (colon < 0) return;
-
-      const key = line.slice(0, colon).toUpperCase();
-      const value = line.slice(colon + 1).trim();
-
-      if (key.startsWith("FN") || key.startsWith("N")) {
-        if (!result.name || key.startsWith("FN")) {
-          result.name = value.replace(/;/g, " ").trim();
-        }
-      }
-
-      if (key.startsWith("TEL") && !result.phone) {
-        result.phone = value;
-      }
-
-      if (key.startsWith("EMAIL") && !result.email) {
-        result.email = value;
-      }
-
-      if (key.startsWith("URL") && !result.url) {
-        result.url = value;
-      }
-    });
-
-    return result;
-  }
-
-  // URL形式
-  if (/^https?:\/\//i.test(text)) {
-    result.url = text;
-    result.name = getDomainName(text);
-    return result;
-  }
-
-  // Text形式
-  lines.forEach(line => {
-    const match = line.match(
-      /^\s*(name|名前|氏名|fn|phone|電話番号|tel|email|メールアドレス|url|website|website link)\s*[:：=]\s*(.*)$/i
-    );
-
-    if (match) {
-      const key = match[1].toLowerCase();
-      const value = match[2].trim();
-
-      if (["name", "名前", "氏名", "fn"].includes(key)) {
-        result.name = value;
-      } else if (
-        ["phone", "電話番号", "tel"].includes(key)
-      ) {
-        result.phone = value;
-      } else if (
-        ["email", "メールアドレス"].includes(key)
-      ) {
-        result.email = value;
-      } else if (
-        ["url", "website", "website link"].includes(key)
-      ) {
-        result.url = value;
-      }
-
-      return;
-    }
-
-    if (!result.url && /^https?:\/\//i.test(line.trim())) {
-      result.url = line.trim();
-    }
-  });
-
-  // QRに電話番号だけが入っている場合
-  if (!result.name && !result.phone && !result.email && !result.url) {
-    if (/^\+?[\d\s().-]{7,}$/.test(text)) {
-      result.phone = text;
-    } else {
-      result.name = text;
-    }
-  }
-
-  return result;
-}
-
-function getDomainName(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "Website";
-  }
-}
-
-/* =====================================
-   CONTACT FORM
-===================================== */
-
-$("closeContact").addEventListener("click", () => {
-  contactModal.classList.remove("show");
-});
-
-contactForm.addEventListener("submit", event => {
-  event.preventDefault();
-
-  const name = contactName.value.trim();
-  const group = contactGroup.value;
-
-  if (!name || !group) {
-    alert("名前とグループを入力してください。");
-    return;
-  }
-
+function addContact(item) {
   const contact = {
-    id: createId(),
-    name,
-    phone: contactPhone.value.trim(),
-    email: contactEmail.value.trim(),
-    url: contactUrl.value.trim(),
-    group,
+    id: makeId(),
+    name: item.name || "名前なし",
+    phone: item.phone || "",
+    email: item.email || "",
+    url: item.url || "",
+    group: item.group || "other",
     createdAt: new Date().toISOString(),
     order: contacts.length
   };
 
-  contacts.push(contact);
+  if (isDuplicateContact(contact)) {
+    $("status").textContent = "この連絡先はすでに登録されています。";
+    return false;
+  }
 
+  contacts.push(contact);
   saveContacts();
   refreshApp();
+  return true;
+}
 
-  contactModal.classList.remove("show");
-  contactForm.reset();
+function parseQRContact(data) {
+  data = String(data || "").trim();
 
-  showPage("contacts");
+  if (data.startsWith("QRMEISHI_PART:") || data.startsWith("QRMEISHI:")) {
+    return importTransferData(data);
+  }
+
+  if (/^BEGIN:VCARD/i.test(data)) {
+    const lines = data.replace(/\r/g, "").split("\n");
+    const result = { name: "", phone: "", email: "", url: "" };
+
+    for (const line of lines) {
+      const index = line.indexOf(":");
+      if (index < 0) continue;
+
+      const key = line.slice(0, index).split(";")[0].toUpperCase();
+      const value = line.slice(index + 1).trim();
+
+      if (key === "FN") result.name = value;
+      if (key === "TEL") result.phone = value;
+      if (key === "EMAIL") result.email = value;
+      if (key === "URL") result.url = value;
+    }
+
+    if (!result.name) {
+      const n = lines.find(line => /^N(?:;[^:]*)?:/i.test(line));
+      if (n) {
+        result.name = n.substring(n.indexOf(":") + 1)
+          .split(";").reverse().filter(Boolean).join(" ");
+      }
+    }
+
+    return addContact(result);
+  }
+
+  if (/^https?:\/\//i.test(data)) {
+    return addContact({
+      name: data,
+      url: data,
+      group: "other"
+    });
+  }
+
+  return addContact({
+    name: data,
+    group: "other"
+  });
+}
+
+$("contactForm").addEventListener("submit", event => {
+  event.preventDefault();
+
+  const item = {
+    name: $("name").value,
+    phone: $("phone").value,
+    email: $("email").value,
+    url: $("url").value,
+    group: $("group").value
+  };
+
+  if (addContact(item)) {
+    event.target.reset();
+    $("status").textContent = "連絡先を登録しました。";
+  }
 });
 
-/* =====================================
-   DISPLAY CONTACTS
-===================================== */
+function refreshApp() {
+  renderContacts();
+  updateDashboard();
+}
 
-function createContactElement(contact) {
-  const item = document.createElement("div");
-
-  item.className = "contact-item";
-  item.draggable = true;
-  item.dataset.id = contact.id;
-
-  const info = document.createElement("div");
-  info.className = "contact-info";
-
-  const name = document.createElement("h4");
-  name.textContent = contact.name;
-
-  const group = document.createElement("span");
-  group.className = "group-badge " + contact.group;
-  group.textContent = getGroupName(contact.group);
-
-  info.append(name, group);
-
-  if (contact.phone) {
-    const phone = document.createElement("p");
-    phone.textContent = "☎ " + contact.phone;
-    info.appendChild(phone);
-  }
-
-  if (contact.email) {
-    const email = document.createElement("p");
-    email.textContent = "✉ " + contact.email;
-    info.appendChild(email);
-  }
-
-  if (contact.url) {
-    const link = document.createElement("a");
-    link.href = contact.url;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "🌐 " + contact.url;
-    link.className = "contact-link";
-    link.style.color = "#60a5fa";
-    link.style.fontSize = "11px";
-    link.style.display = "block";
-    link.style.marginTop = "5px";
-    info.appendChild(link);
-  }
-
-  const actions = document.createElement("div");
-  actions.className = "contact-actions";
-
-  const deleteButton = document.createElement("button");
-  deleteButton.className = "delete-btn";
-  deleteButton.textContent = "削除";
-  deleteButton.addEventListener("click", () => {
-    deleteContact(contact.id);
-  });
-
-  actions.appendChild(deleteButton);
-
-  item.append(info, actions);
-
-  return item;
+function updateDashboard() {
+  $("totalCount").textContent = contacts.length;
+  $("friendCount").textContent =
+    contacts.filter(c => c.group === "friend").length;
+  $("teacherCount").textContent =
+    contacts.filter(c => c.group === "teacher").length;
+  $("otherCount").textContent =
+    contacts.filter(c => c.group === "other").length;
 }
 
 function renderContacts() {
   const list = $("contactList");
-  list.replaceChildren();
+  list.innerHTML = "";
 
-  const keyword = $("searchInput").value.toLowerCase();
-  const selectedGroup = $("groupFilter").value;
+  const search = normalize($("search").value);
+  const group = $("filterGroup").value;
 
-  const filtered = contacts.filter(contact => {
-    const matchesName =
-      contact.name.toLowerCase().includes(keyword);
+  const filtered = [...contacts]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .filter(c => {
+      const matchesSearch = [
+        c.name, c.phone, c.email, c.url
+      ].some(value => normalize(value).includes(search));
 
-    const matchesGroup =
-      selectedGroup === "all" ||
-      contact.group === selectedGroup;
+      return matchesSearch &&
+        (group === "all" || c.group === group);
+    });
 
-    const matchesTab =
-      activeGroup === "all" ||
-      contact.group === activeGroup;
-
-    return matchesName && matchesGroup && matchesTab;
-  });
-
-  if (filtered.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-message";
-    empty.textContent = "名刺情報がありません。";
-    list.appendChild(empty);
+  if (!filtered.length) {
+    list.textContent = "連絡先がありません。";
     return;
   }
 
   filtered.forEach(contact => {
-    list.appendChild(createContactElement(contact));
-  });
-}
+    const item = document.createElement("div");
+    item.className = "contact-item";
+    item.dataset.id = contact.id;
+    item.draggable = true;
 
-function renderRecent() {
-  const list = $("recentList");
-  list.replaceChildren();
+    const handle = document.createElement("span");
+    handle.className = "drag-handle";
+    handle.textContent = "⠿";
+    handle.title = "ドラッグして並べ替え";
+    handle.addEventListener("pointerdown", startTouchDrag);
 
-  const recent = [...contacts].slice(-5).reverse();
+    const info = document.createElement("div");
+    info.className = "contact-info";
 
-  if (recent.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-message";
-    empty.textContent = "まだ名刺が登録されていません。";
-    list.appendChild(empty);
-    return;
-  }
+    const name = document.createElement("strong");
+    name.textContent = contact.name;
 
-  recent.forEach(contact => {
-    list.appendChild(createContactElement(contact));
-  });
-}
+    const detail = document.createElement("p");
+    detail.textContent =
+      `分類: ${groupLabel(contact.group)} | ${contact.phone}`;
 
-$("searchInput").addEventListener("input", renderContacts);
+    const email = document.createElement("p");
+    email.textContent = contact.email;
 
-$("groupFilter").addEventListener("change", () => {
-  activeGroup = "all";
-  updateGroupTabs();
-  renderContacts();
-});
+    info.append(name, detail, email);
 
-document.querySelectorAll(".group-tab").forEach(button => {
-  button.addEventListener("click", () => {
-    activeGroup = button.dataset.group;
-    $("groupFilter").value = "all";
-    updateGroupTabs();
-    renderContacts();
-  });
-});
+    if (contact.url) {
+      const link = document.createElement("a");
+      link.href = contact.url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = contact.url;
+      info.append(link);
+    }
 
-function updateGroupTabs() {
-  document.querySelectorAll(".group-tab").forEach(button => {
-    button.classList.toggle(
-      "active",
-      button.dataset.group === activeGroup
-    );
-  });
-}
+    const actions = document.createElement("div");
+    actions.className = "contact-actions";
 
-/* =====================================
-   DELETE & UNDO
-===================================== */
+    const del = document.createElement("button");
+    del.textContent = "削除";
+    del.addEventListener("click", () => deleteContact(contact.id));
 
-function deleteContact(id) {
-  // 以前の削除が残っている場合は確定する
-  if (pendingDelete) {
-    finalizeDelete();
-  }
-
-  const index = contacts.findIndex(c => c.id === id);
-  if (index === -1) return;
-
-  const removed = contacts.splice(index, 1)[0];
-
-  pendingDelete = {
-    contact: removed,
-    index
-  };
-
-  saveContacts();
-  refreshApp();
-
-  undoToast.classList.add("show");
-
-  deleteTimer = setTimeout(() => {
-    finalizeDelete();
-  }, 45000);
-}
-
-function finalizeDelete() {
-  clearTimeout(deleteTimer);
-  pendingDelete = null;
-  undoToast.classList.remove("show");
-}
-
-$("undoBtn").addEventListener("click", () => {
-  if (!pendingDelete) return;
-
-  clearTimeout(deleteTimer);
-
-  const { contact, index } = pendingDelete;
-
-  contacts.splice(index, 0, contact);
-
-  pendingDelete = null;
-  undoToast.classList.remove("show");
-
-  saveContacts();
-  refreshApp();
-});
-
-/* =====================================
-   DRAG & DROP
-===================================== */
-
-let draggedId = null;
-
-function enableDragAndDrop() {
-  document.querySelectorAll(".contact-item").forEach(item => {
+    actions.append(del);
+    item.append(handle, info, actions);
 
     item.addEventListener("dragstart", () => {
-      draggedId = item.dataset.id;
-      item.style.opacity = "0.4";
+      draggingId = contact.id;
+      item.classList.add("dragging");
     });
 
     item.addEventListener("dragend", () => {
-      item.style.opacity = "1";
-      draggedId = null;
+      draggingId = null;
+      item.classList.remove("dragging");
     });
 
-    item.addEventListener("dragover", event => {
-      event.preventDefault();
-    });
+    item.addEventListener("dragover", event => event.preventDefault());
 
     item.addEventListener("drop", event => {
       event.preventDefault();
-
-      const targetId = item.dataset.id;
-
-      if (!draggedId || draggedId === targetId) return;
-
-      reorderContacts(draggedId, targetId);
+      reorderContacts(draggingId, contact.id);
     });
+
+    list.append(item);
   });
 }
 
+function groupLabel(group) {
+  return {
+    friend: "友達",
+    teacher: "先生",
+    other: "その他"
+  }[group] || "その他";
+}
+
 function reorderContacts(sourceId, targetId) {
-  const sourceIndex = contacts.findIndex(c => c.id === sourceId);
-  const targetIndex = contacts.findIndex(c => c.id === targetId);
+  if (!sourceId || !targetId || sourceId === targetId) return;
 
-  if (sourceIndex < 0 || targetIndex < 0) return;
+  const from = contacts.findIndex(c => c.id === sourceId);
+  const to = contacts.findIndex(c => c.id === targetId);
 
-  const [moved] = contacts.splice(sourceIndex, 1);
-  contacts.splice(targetIndex, 0, moved);
+  if (from < 0 || to < 0) return;
 
-  contacts.forEach((contact, index) => {
-    contact.order = index;
-  });
+  const [moved] = contacts.splice(from, 1);
+  contacts.splice(to, 0, moved);
+
+  contacts.forEach((c, i) => c.order = i);
 
   saveContacts();
   refreshApp();
 }
 
-/* =====================================
-   TOUCH DRAG & DROP
-===================================== */
+let touchTarget = null;
 
-let touchSourceId = null;
+function startTouchDrag(event) {
+  if (event.pointerType === "mouse") return;
 
-function enableTouchReorder() {
-  document.querySelectorAll(".contact-item").forEach(item => {
-    item.addEventListener("pointerdown", event => {
-      if (event.pointerType === "mouse") return;
+  event.preventDefault();
 
-      touchSourceId = item.dataset.id;
+  const item = event.currentTarget.closest(".contact-item");
+  if (!item) return;
+
+  touchTarget = item.dataset.id;
+  item.style.opacity = "0.5";
+
+  function finish(ev) {
+    if (!touchTarget) return;
+
+    const source = touchTarget;
+    const targetElement = document.elementFromPoint(
+      ev.clientX, ev.clientY
+    );
+    const target = targetElement?.closest(".contact-item");
+
+    document.querySelectorAll(".contact-item").forEach(el => {
+      el.style.opacity = "1";
     });
 
-    item.addEventListener("pointerup", event => {
-      if (!touchSourceId) return;
+    if (target) {
+      reorderContacts(source, target.dataset.id);
+    }
 
-      const target = document.elementFromPoint(
-        event.clientX,
-        event.clientY
-      );
+    touchTarget = null;
+    document.removeEventListener("pointerup", finish);
+    document.removeEventListener("pointercancel", cancel);
+  }
 
-      const targetItem = target?.closest(".contact-item");
+  function cancel() {
+    touchTarget = null;
+    document.querySelectorAll(".contact-item").forEach(el => {
+      el.style.opacity = "1";
+    });
+    document.removeEventListener("pointerup", finish);
+    document.removeEventListener("pointercancel", cancel);
+  }
 
-      if (
-        targetItem &&
-        targetItem.dataset.id !== touchSourceId
-      ) {
-        reorderContacts(
-          touchSourceId,
-          targetItem.dataset.id
-        );
+  document.addEventListener("pointerup", finish);
+  document.addEventListener("pointercancel", cancel);
+}
+
+function deleteContact(id) {
+  const index = contacts.findIndex(c => c.id === id);
+  if (index < 0) return;
+
+  pendingDelete = {
+    contact: contacts[index],
+    index
+  };
+
+  contacts.splice(index, 1);
+  saveContacts();
+  refreshApp();
+
+  $("undoButton").disabled = false;
+  $("undoMessage").textContent =
+    "45秒以内なら削除した連絡先を復元できます。";
+
+  clearTimeout(pendingTimer);
+
+  pendingTimer = setTimeout(() => {
+    pendingDelete = null;
+    $("undoButton").disabled = true;
+    $("undoMessage").textContent = "復元できるデータはありません。";
+  }, 45000);
+}
+
+$("undoButton").addEventListener("click", () => {
+  if (!pendingDelete) return;
+
+  contacts.splice(pendingDelete.index, 0, pendingDelete.contact);
+  contacts.forEach((c, i) => c.order = i);
+
+  pendingDelete = null;
+  clearTimeout(pendingTimer);
+
+  saveContacts();
+  refreshApp();
+
+  $("undoButton").disabled = true;
+  $("undoMessage").textContent = "連絡先を復元しました。";
+});
+
+async function startScanner() {
+  try {
+    if (!scanner) {
+      scanner = new Html5Qrcode("reader");
+    }
+
+    await scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      async decodedText => {
+        await stopScanner();
+        parseQRContact(decodedText);
       }
+    );
 
-      touchSourceId = null;
-    });
+    $("status").textContent = "QRコードを読み込んでいます。";
+  } catch (error) {
+    $("status").textContent = "カメラを起動できませんでした。HTTPSを確認してください。";
+  }
+}
 
-    item.addEventListener("pointercancel", () => {
-      touchSourceId = null;
-    });
+async function stopScanner() {
+  if (scanner && scanner.isScanning) {
+    try {
+      await scanner.stop();
+      await scanner.clear();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+}
+
+$("startScan").addEventListener("click", startScanner);
+$("stopScan").addEventListener("click", stopScanner);
+
+$("search").addEventListener("input", renderContacts);
+$("filterGroup").addEventListener("change", renderContacts);
+
+// Transfer QR: split into small QR pages
+function createTransferPages() {
+  if (!contacts.length) {
+    alert("転送する連絡先がありません。");
+    return;
+  }
+
+  const transferId = makeId();
+  const chunks = [];
+
+  // Small chunks improve QR readability on phones
+  for (let i = 0; i < contacts.length; i += 2) {
+    chunks.push(contacts.slice(i, i + 2));
+  }
+
+  transferPages = chunks.map((chunk, index) => {
+    const payload = {
+      type: "QRMEISHI_PART",
+      version: 2,
+      transferId,
+      part: index + 1,
+      total: chunks.length,
+      contacts: chunk.map(c => ({
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+        url: c.url,
+        group: c.group
+      }))
+    };
+
+    return "QRMEISHI_PART:" + JSON.stringify(payload);
+  });
+
+  transferPageIndex = 0;
+  showTransferPage();
+}
+
+function showTransferPage() {
+  const container = $("generatedQR");
+  container.innerHTML = "";
+
+  const page = document.createElement("div");
+  page.className = "qr-page";
+
+  const heading = document.createElement("h3");
+  heading.textContent =
+    `QR ${transferPageIndex + 1} / ${transferPages.length}`;
+
+  const qr = document.createElement("div");
+  qr.id = "transferQRCode";
+
+  const nav = document.createElement("div");
+
+  const prev = document.createElement("button");
+  prev.textContent = "前へ";
+  prev.disabled = transferPageIndex === 0;
+  prev.onclick = () => {
+    transferPageIndex--;
+    showTransferPage();
+  };
+
+  const next = document.createElement("button");
+  next.textContent = "次へ";
+  next.disabled = transferPageIndex === transferPages.length - 1;
+  next.onclick = () => {
+    transferPageIndex++;
+    showTransferPage();
+  };
+
+  const instruction = document.createElement("p");
+  instruction.textContent = "すべてのQRコードを順番に読み込んでください。";
+
+  nav.append(prev, next);
+  page.append(heading, qr, nav, instruction);
+  container.append(page);
+
+  new QRCode(qr, {
+    text: transferPages[transferPageIndex],
+    width: 240,
+    height: 240,
+    correctLevel: QRCode.CorrectLevel.L
   });
 }
 
-/* =====================================
-   DASHBOARD COUNTS
-===================================== */
+$("exportData").addEventListener("click", createTransferPages);
 
-function updateStatistics() {
-  const friends = contacts.filter(c => c.group === "friend").length;
-  const teachers = contacts.filter(c => c.group === "teacher").length;
-  const others = contacts.filter(c => c.group === "other").length;
-
-  $("totalCount").textContent = contacts.length;
-  $("friendCount").textContent = friends;
-  $("teacherCount").textContent = teachers;
-  $("otherCount").textContent = others;
-}
-
-/* =====================================
-   CHARTS
-===================================== */
-
-function getGroupCounts() {
-  return [
-    contacts.filter(c => c.group === "friend").length,
-    contacts.filter(c => c.group === "teacher").length,
-    contacts.filter(c => c.group === "other").length
-  ];
-}
-
-function updateCharts() {
-  if (typeof Chart === "undefined") return;
-
-  const counts = getGroupCounts();
-
-  const options = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        labels: {
-          color: "#cbd5e1"
-        }
-      }
-    },
-    scales: {
-      x: {
-        ticks: { color: "#94a3b8" },
-        grid: { color: "#25334a" }
-      },
-      y: {
-        beginAtZero: true,
-        ticks: {
-          color: "#94a3b8",
-          precision: 0
-        },
-        grid: { color: "#25334a" }
-      }
-    }
-  };
-
-  if ($("groupChart")) {
-    if (groupChart) groupChart.destroy();
-
-    groupChart = new Chart($("groupChart"), {
-      type: "doughnut",
-      data: {
-        labels: ["友達", "先生", "その他"],
-        datasets: [{
-          data: counts,
-          backgroundColor: ["#3b82f6", "#fbbf24", "#a78bfa"],
-          borderWidth: 0
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: "bottom",
-            labels: { color: "#cbd5e1" }
-          }
-        }
-      }
-    });
-  }
-
-  if ($("analyticsChart")) {
-    if (analyticsChart) analyticsChart.destroy();
-
-    analyticsChart = new Chart($("analyticsChart"), {
-      type: "bar",
-      data: {
-        labels: ["友達", "先生", "その他"],
-        datasets: [{
-          label: "登録人数",
-          data: counts,
-          backgroundColor: ["#3b82f6", "#fbbf24", "#a78bfa"],
-          borderRadius: 8
-        }]
-      },
-      options
-    });
-  }
-}
-
-/* =====================================
-   QR CODE EXPORT
-===================================== */
-
-$("generateQR").addEventListener("click", () => {
-  if (contacts.length === 0) {
-    alert("転送するデータがありません。");
-    return;
-  }
-
-  if (typeof QRCode === "undefined") {
-    alert("QRコード作成ライブラリを読み込めませんでした。");
-    return;
-  }
-
-  const exportData = {
-    type: "QRMEISHI_BULK",
-    version: 1,
-    contacts: contacts.map(c => ({
-      name: c.name,
-      phone: c.phone,
-      email: c.email,
-      url: c.url,
-      group: c.group,
-      createdAt: c.createdAt
-    }))
-  };
-
-  const qrText = "QRMEISHI:" + JSON.stringify(exportData);
-
-  const container = $("generatedQR");
-  container.replaceChildren();
-
+function importTransferData(data) {
   try {
-    new QRCode(container, {
-      text: qrText,
-      width: 256,
-      height: 256,
-      correctLevel: QRCode.CorrectLevel.L
-    });
+    let payload;
 
-    if (qrText.length > 1800) {
-      alert(
-        "データ量が多いため、QRコードが読み取れない場合があります。"
-      );
+    if (data.startsWith("QRMEISHI_PART:")) {
+      payload = JSON.parse(data.substring("QRMEISHI_PART:".length));
+    } else {
+      payload = JSON.parse(data.substring("QRMEISHI:".length));
     }
+
+    // New multi-part format
+    if (payload.type === "QRMEISHI_PART") {
+      const saved = JSON.parse(localStorage.getItem(TRANSFER_KEY) || "{}");
+
+      if (saved.transferId && saved.transferId !== payload.transferId) {
+        localStorage.removeItem(TRANSFER_KEY);
+      }
+
+      const current = JSON.parse(localStorage.getItem(TRANSFER_KEY) || "{}");
+
+      current.transferId = payload.transferId;
+      current.total = payload.total;
+      current.parts = current.parts || {};
+      current.parts[payload.part] = payload.contacts || [];
+
+      localStorage.setItem(TRANSFER_KEY, JSON.stringify(current));
+
+      const received = Object.keys(current.parts).length;
+
+      if (received < payload.total) {
+        $("status").textContent =
+          `転送QR ${received}/${payload.total} 件を読み込みました。`;
+        return true;
+      }
+
+      const all = [];
+      for (let i = 1; i <= payload.total; i++) {
+        if (!current.parts[i]) {
+          $("status").textContent = "QRコードが不足しています。";
+          return true;
+        }
+        all.push(...current.parts[i]);
+      }
+
+      const added = importContacts(all);
+      localStorage.removeItem(TRANSFER_KEY);
+
+      $("status").textContent =
+        `転送完了：${added}件を追加しました。`;
+      return true;
+    }
+
+    // Old transfer format support
+    if (payload.type === "QRMEISHI_BULK" && Array.isArray(payload.contacts)) {
+      const added = importContacts(payload.contacts);
+      $("status").textContent = `${added}件を追加しました。`;
+      return true;
+    }
+
+    throw new Error("Invalid transfer");
   } catch (error) {
-    console.error(error);
-    alert("QRコードを作成できませんでした。");
+    $("status").textContent = "転送QRを読み込めませんでした。";
+    return false;
   }
-});
+}
 
-/* =====================================
-   BULK QR IMPORT
-===================================== */
+function importContacts(items) {
+  let added = 0;
 
-function importAllContacts(rawText) {
-  try {
-    const jsonText = rawText.slice("QRMEISHI:".length);
-    const data = JSON.parse(jsonText);
-
-    if (
-      data.type !== "QRMEISHI_BULK" ||
-      !Array.isArray(data.contacts)
-    ) {
-      throw new Error("Invalid QR data");
-    }
-
-    const validContacts = data.contacts
-      .filter(c => c && typeof c.name === "string" && c.name.trim())
-      .map(c => ({
-        id: createId(),
-        name: c.name.trim(),
-        phone: typeof c.phone === "string" ? c.phone : "",
-        email: typeof c.email === "string" ? c.email : "",
-        url: typeof c.url === "string" ? c.url : "",
-        group: ["friend", "teacher", "other"].includes(c.group)
-          ? c.group
-          : "other",
-        createdAt: c.createdAt || new Date().toISOString(),
+  items.forEach(item => {
+    if (!isDuplicateContact(item)) {
+      contacts.push({
+        id: makeId(),
+        name: item.name || "名前なし",
+        phone: item.phone || "",
+        email: item.email || "",
+        url: item.url || "",
+        group: item.group || "other",
+        createdAt: new Date().toISOString(),
         order: contacts.length
-      }));
-
-    if (validContacts.length === 0) {
-      alert("読み込めるデータがありません。");
-      return;
+      });
+      added++;
     }
+  });
 
-    const approved = confirm(
-      validContacts.length +
-      "人分の名刺データを登録しますか？"
-    );
-
-    if (!approved) return;
-
-    contacts.push(...validContacts);
-
-    saveContacts();
-    refreshApp();
-    showPage("contacts");
-
-    alert(validContacts.length + "人分のデータを登録しました。");
-
-  } catch (error) {
-    console.error(error);
-    alert("QRコードのデータを読み取れませんでした。");
-  }
-}
-
-/* =====================================
-   IMPORT QR SCANNER
-===================================== */
-
-$("importQR").addEventListener("click", openScanner);
-
-/* =====================================
-   APP UPDATE
-===================================== */
-
-function refreshApp() {
-  updateStatistics();
-  renderContacts();
-  renderRecent();
-  updateCharts();
-
-  enableDragAndDrop();
-  enableTouchReorder();
-}
-
-/* =====================================
-   INITIAL START
-===================================== */
-
-function startApp() {
+  saveContacts();
   refreshApp();
-  showPage("dashboard");
+  return added;
 }
 
-startApp();
+$("importData").addEventListener("click", startScanner);
+
+// Initial display
+refreshApp();
