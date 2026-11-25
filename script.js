@@ -6,7 +6,6 @@
 ===================================== */
 
 const STORAGE_KEY = "qrMeishiContacts";
-const PART_STORAGE_KEY = "qrMeishiTransferParts";
 
 let contacts = loadContacts();
 let scanner = null;
@@ -120,7 +119,9 @@ function showPage(pageId) {
     transfer: "QR Transfer"
   };
 
-  $("pageTitle").textContent = titles[pageId] || "Dashboard";
+  if ($("pageTitle")) {
+    $("pageTitle").textContent = titles[pageId] || "Dashboard";
+  }
 
   if (pageId === "analytics") {
     updateCharts();
@@ -137,13 +138,17 @@ document.querySelectorAll("[data-target]").forEach(button => {
   });
 });
 
-$("quickContacts").addEventListener("click", () => {
-  showPage("contacts");
-});
+if ($("quickContacts")) {
+  $("quickContacts").addEventListener("click", () => {
+    showPage("contacts");
+  });
+}
 
-$("quickTransfer").addEventListener("click", () => {
-  showPage("transfer");
-});
+if ($("quickTransfer")) {
+  $("quickTransfer").addEventListener("click", () => {
+    showPage("transfer");
+  });
+}
 
 /* =====================================
    QR SCANNER
@@ -151,7 +156,9 @@ $("quickTransfer").addEventListener("click", () => {
 
 function openScanner() {
   scannerModal.classList.add("show");
-  $("scanStatus").textContent = "カメラを起動しています...";
+
+  $("scanStatus").textContent =
+    "カメラを起動しています...";
 
   if (typeof Html5Qrcode === "undefined") {
     $("scanStatus").textContent =
@@ -174,7 +181,7 @@ function openScanner() {
       handleQRData(decodedText);
     },
     () => {
-      // 読み取り途中のエラーは無視する
+      // 読み取り途中のエラーは無視
     }
   ).then(() => {
     $("scanStatus").textContent =
@@ -182,6 +189,7 @@ function openScanner() {
   }).catch(error => {
     console.error(error);
     scanner = null;
+
     $("scanStatus").textContent =
       "カメラを起動できません。カメラの使用を許可してください。";
   });
@@ -204,10 +212,21 @@ function stopScanner() {
     });
 }
 
-$("openScanner").addEventListener("click", openScanner);
-$("quickScan").addEventListener("click", openScanner);
-$("contactScan").addEventListener("click", openScanner);
-$("closeScanner").addEventListener("click", stopScanner);
+if ($("openScanner")) {
+  $("openScanner").addEventListener("click", openScanner);
+}
+
+if ($("quickScan")) {
+  $("quickScan").addEventListener("click", openScanner);
+}
+
+if ($("contactScan")) {
+  $("contactScan").addEventListener("click", openScanner);
+}
+
+if ($("closeScanner")) {
+  $("closeScanner").addEventListener("click", stopScanner);
+}
 
 /* =====================================
    QR DATA READING
@@ -216,11 +235,7 @@ $("closeScanner").addEventListener("click", stopScanner);
 function handleQRData(rawText) {
   const text = rawText.trim();
 
-  if (text.startsWith("QRMEISHI_PART:")) {
-    importQRPart(text);
-    return;
-  }
-
+  // QRMEISHI形式のデータを読み込む
   if (text.startsWith("QRMEISHI:")) {
     importAllContacts(text);
     return;
@@ -327,8 +342,9 @@ function parseQRContact(text) {
     }
   });
 
-  // QRに電話番号だけが入っている場合
-  if (!result.name && !result.phone && !result.email && !result.url) {
+  // 電話番号だけの場合
+  if (!result.name && !result.phone &&
+      !result.email && !result.url) {
     if (/^\+?[\d\s().-]{7,}$/.test(text)) {
       result.phone = text;
     } else {
@@ -351,9 +367,11 @@ function getDomainName(url) {
    CONTACT FORM
 ===================================== */
 
-$("closeContact").addEventListener("click", () => {
-  contactModal.classList.remove("show");
-});
+if ($("closeContact")) {
+  $("closeContact").addEventListener("click", () => {
+    contactModal.classList.remove("show");
+  });
+}
 
 contactForm.addEventListener("submit", event => {
   event.preventDefault();
@@ -396,7 +414,6 @@ contactForm.addEventListener("submit", event => {
 
 function createContactElement(contact, reorderable = true) {
   const item = document.createElement("div");
-
   item.className = "contact-item";
   item.dataset.id = contact.id;
 
@@ -431,10 +448,12 @@ function createContactElement(contact, reorderable = true) {
     link.rel = "noopener noreferrer";
     link.textContent = "🌐 " + contact.url;
     link.className = "contact-link";
+
     link.style.color = "#60a5fa";
     link.style.fontSize = "11px";
     link.style.display = "block";
     link.style.marginTop = "5px";
+
     info.appendChild(link);
   }
 
@@ -526,18 +545,27 @@ function renderRecent() {
   });
 }
 
-$("searchInput").addEventListener("input", renderContacts);
+/* =====================================
+   SEARCH AND FILTER
+===================================== */
 
-$("groupFilter").addEventListener("change", () => {
-  activeGroup = "all";
-  updateGroupTabs();
-  renderContacts();
-});
+if ($("searchInput")) {
+  $("searchInput").addEventListener("input", renderContacts);
+}
+
+if ($("groupFilter")) {
+  $("groupFilter").addEventListener("change", () => {
+    activeGroup = "all";
+    updateGroupTabs();
+    renderContacts();
+  });
+}
 
 document.querySelectorAll(".group-tab").forEach(button => {
   button.addEventListener("click", () => {
     activeGroup = button.dataset.group;
     $("groupFilter").value = "all";
+
     updateGroupTabs();
     renderContacts();
   });
@@ -587,21 +615,23 @@ function finalizeDelete() {
   undoToast.classList.remove("show");
 }
 
-$("undoBtn").addEventListener("click", () => {
-  if (!pendingDelete) return;
+if ($("undoBtn")) {
+  $("undoBtn").addEventListener("click", () => {
+    if (!pendingDelete) return;
 
-  clearTimeout(deleteTimer);
+    clearTimeout(deleteTimer);
 
-  const { contact, index } = pendingDelete;
+    const { contact, index } = pendingDelete;
 
-  contacts.splice(index, 0, contact);
+    contacts.splice(index, 0, contact);
 
-  pendingDelete = null;
-  undoToast.classList.remove("show");
+    pendingDelete = null;
+    undoToast.classList.remove("show");
 
-  saveContacts();
-  refreshApp();
-});
+    saveContacts();
+    refreshApp();
+  });
+}
 
 /* =====================================
    DESKTOP DRAG & DROP
@@ -828,7 +858,7 @@ function updateCharts() {
 }
 
 /* =====================================
-   QR CODE EXPORT - MULTI PART
+   QR CODE EXPORT - SINGLE QR
 ===================================== */
 
 $("generateQR").addEventListener("click", () => {
@@ -851,92 +881,41 @@ $("generateQR").addEventListener("click", () => {
     createdAt: c.createdAt
   }));
 
-  const transferId = createId();
-  const chunks = [];
-  let currentChunk = [];
-
-  exportContacts.forEach(contact => {
-    const testChunk = [...currentChunk, contact];
-
-    const testText = JSON.stringify({
-      type: "QRMEISHI_PART",
-      version: 2,
-      transferId,
-      part: 1,
-      total: 1,
-      contacts: testChunk
-    });
-
-    if (testText.length > 700 && currentChunk.length > 0) {
-      chunks.push(currentChunk);
-      currentChunk = [contact];
-    } else {
-      currentChunk = testChunk;
-    }
+  const payload = "QRMEISHI:" + JSON.stringify({
+    type: "QRMEISHI_BULK",
+    version: 1,
+    contacts: exportContacts
   });
 
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk);
-  }
-
-  const total = chunks.length;
   const container = $("generatedQR");
-
   container.replaceChildren();
 
-  chunks.forEach((chunk, index) => {
-    const wrapper = document.createElement("div");
+  const qrBox = document.createElement("div");
 
-    wrapper.className = "generated-qr";
-    wrapper.style.display = "inline-flex";
-    wrapper.style.flexDirection = "column";
-    wrapper.style.alignItems = "center";
-    wrapper.style.padding = "12px";
-    wrapper.style.margin = "8px";
-    wrapper.style.background = "#ffffff";
-    wrapper.style.borderRadius = "12px";
-    wrapper.style.maxWidth = "100%";
-
-    const label = document.createElement("p");
-    label.textContent = `Part ${index + 1} / ${total}`;
-    label.style.color = "#111827";
-    label.style.fontWeight = "bold";
-
-    const qrBox = document.createElement("div");
-
-    wrapper.append(label, qrBox);
-    container.appendChild(wrapper);
-
-    const payload = "QRMEISHI_PART:" + JSON.stringify({
-      type: "QRMEISHI_PART",
-      version: 2,
-      transferId,
-      part: index + 1,
-      total,
-      contacts: chunk
+  try {
+    new QRCode(qrBox, {
+      text: payload,
+      width: 300,
+      height: 300,
+      correctLevel: QRCode.CorrectLevel.L
     });
 
-    try {
-      new QRCode(qrBox, {
-        text: payload,
-        width: 220,
-        height: 220,
-        correctLevel: QRCode.CorrectLevel.M
-      });
-    } catch (error) {
-      console.error(error);
-      alert("QRコードを作成できませんでした。");
-    }
-  });
+    container.appendChild(qrBox);
 
-  const message = document.createElement("p");
-  message.textContent =
-    `全部で ${total} 個のQRコードがあります。すべて読み込んでください。`;
+    const message = document.createElement("p");
 
-  message.style.color = "#cbd5e1";
-  message.style.marginTop = "12px";
+    message.textContent =
+      "このQRコードを別の端末で読み込むと、名刺データを転送できます。";
 
-  container.appendChild(message);
+    container.appendChild(message);
+
+  } catch (error) {
+    console.error(error);
+
+    alert(
+      "QRコードを作成できませんでした。データ量が多すぎる可能性があります。"
+    );
+  }
 });
 
 /* =====================================
@@ -982,7 +961,9 @@ function importContactList(importedContacts) {
   const skipped = importedContacts.length - newContacts.length;
 
   if (newContacts.length === 0) {
-    alert("新しい名刺データはありません。重複データは登録されませんでした。");
+    alert(
+      "新しい名刺データはありません。重複データは登録されませんでした。"
+    );
     return;
   }
 
@@ -1006,7 +987,6 @@ function importContactList(importedContacts) {
   );
 }
 
-// पुरानो Single Bulk QR Import
 function importAllContacts(rawText) {
   try {
     const jsonText = rawText.slice("QRMEISHI:".length);
@@ -1026,107 +1006,6 @@ function importAllContacts(rawText) {
     alert("QRコードのデータを読み取れませんでした。");
   }
 }
-
-// नयाँ Multi Part QR Import
-function importQRPart(rawText) {
-  try {
-    const jsonText = rawText.slice("QRMEISHI_PART:".length);
-    const data = JSON.parse(jsonText);
-
-    if (
-      data.type !== "QRMEISHI_PART" ||
-      !data.transferId ||
-      !Array.isArray(data.contacts) ||
-      !Number.isInteger(data.part) ||
-      !Number.isInteger(data.total) ||
-      data.part < 1 ||
-      data.part > data.total ||
-      data.total < 1
-    ) {
-      throw new Error("Invalid QR part");
-    }
-
-    let transfers = {};
-
-    try {
-      transfers = JSON.parse(
-        localStorage.getItem(PART_STORAGE_KEY)
-      ) || {};
-    } catch {
-      transfers = {};
-    }
-
-    if (!transfers[data.transferId]) {
-      transfers[data.transferId] = {
-        total: data.total,
-        parts: {}
-      };
-    }
-
-    const transfer = transfers[data.transferId];
-
-    if (transfer.total !== data.total) {
-      throw new Error("Transfer data mismatch");
-    }
-
-    const partKey = String(data.part);
-
-    if (transfer.parts[partKey]) {
-      alert(`Part ${data.part} はすでに読み込み済みです。`);
-      return;
-    }
-
-    transfer.parts[partKey] = data.contacts;
-
-    localStorage.setItem(
-      PART_STORAGE_KEY,
-      JSON.stringify(transfers)
-    );
-
-    const received = Object.keys(transfer.parts).length;
-
-    if (received < transfer.total) {
-      alert(
-        `QRコードを読み込みました。\n` +
-        `進捗: ${received} / ${transfer.total}\n\n` +
-        `次のQRコードを読み込んでください。`
-      );
-      return;
-    }
-
-    const allContacts = [];
-
-    for (let i = 1; i <= transfer.total; i++) {
-      const part = transfer.parts[String(i)];
-
-      if (!part) {
-        alert("一部のQRコードが不足しています。");
-        return;
-      }
-
-      allContacts.push(...part);
-    }
-
-    delete transfers[data.transferId];
-
-    localStorage.setItem(
-      PART_STORAGE_KEY,
-      JSON.stringify(transfers)
-    );
-
-    importContactList(allContacts);
-
-  } catch (error) {
-    console.error(error);
-    alert("QRコードのデータを読み取れませんでした。");
-  }
-}
-
-/* =====================================
-   IMPORT QR SCANNER
-===================================== */
-
-$("importQR").addEventListener("click", openScanner);
 
 /* =====================================
    APP UPDATE
